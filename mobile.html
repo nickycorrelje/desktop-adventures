@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mobile prototype – Nicky's Desktop Adventures</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Catamaran:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/site.css?v=b5a3c3e9">
+<!--
+  Mobile prototype. It loads the real pages (index.html, room-home.html, …) and shows them in a phone layout,
+  so texts and art stay the same as the desktop site. Needs the site served over http:
+  python3 -m http.server 8000  →  http://localhost:8000/mobile.html
+-->
+<style>
+:root{--peek:78px}
+html,body{height:100%}
+body.m-body{overflow:hidden}
+.m-phone{position:relative;height:100vh;height:100dvh;display:flex;flex-direction:column;background:var(--cream);overflow:hidden}
+.m-caption{display:none}
+@media (min-width:600px){
+  body.m-body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px}
+  .m-phone{width:390px;height:min(844px,calc(100dvh - 70px));border:2.5px solid var(--ink);border-radius:34px;box-shadow:10px 10px 0 var(--ink)}
+  .m-caption{display:block;font:700 13px var(--font-sans);color:var(--ink-3)}
+}
+
+/* top bar */
+.m-top{flex:none;display:flex;align-items:center;gap:8px;padding:8px 12px;padding-top:max(8px,env(safe-area-inset-top));background:var(--paper);border-bottom:2.5px solid var(--ink)}
+.m-logo{display:flex;align-items:center;gap:6px;min-height:44px;padding:0;border:0;background:none;font:800 18px var(--font-sans);letter-spacing:-.01em;color:var(--green);cursor:pointer}
+.m-logo img{width:36px;height:24px;image-rendering:pixelated}
+.m-about{margin-left:auto;min-height:40px;padding:0 16px;font-size:14px;box-shadow:3px 3px 0 var(--ink)}
+.m-top button:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+/* the in-game menu (About / Work + map / list), taken from the page itself: same as the desktop window */
+.m-menu{flex:none}
+.m-menu .menu{flex-wrap:nowrap}
+.m-menu .menu a{display:flex;align-items:center;min-height:44px;padding:0 20px}
+.m-menu .menu .views a{padding:0}
+.m-bar{flex:none;display:flex;align-items:center;gap:12px;padding:7px 14px;background:var(--green);color:#fff;border-bottom:2.5px solid var(--ink);font:800 14px var(--font-sans);letter-spacing:.02em}
+.m-bar .dots{display:flex;gap:5px}
+.m-bar .dots i{width:10px;height:10px;background:var(--cream);border:2px solid var(--ink)}
+
+/* screen */
+.m-screen{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:var(--cream)}
+.m-screen.enter{animation:menter .22s ease-out}
+@keyframes menter{from{opacity:0}to{opacity:1}}
+.m-fade{position:absolute;inset:0;z-index:30;background:var(--ink);opacity:0;pointer-events:none;transition:opacity .16s}
+.m-fade.on{opacity:1}
+
+/* the world: tap to walk, the camera follows Nicky */
+.m-wrap{position:relative;overflow:hidden;overflow:clip;background:var(--ink);touch-action:none;cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+.is-map .m-wrap{position:absolute;left:0;right:0;top:0;height:calc(100% - var(--peek) + 20px)}
+.is-room .m-wrap{flex:none;width:100%;border-bottom:2.5px solid var(--ink)}
+.m-world{position:absolute;left:0;top:0;line-height:0;will-change:transform}
+.m-img{width:100%;height:100%;display:block;image-rendering:pixelated;pointer-events:none;-webkit-user-drag:none}
+.m-world .hot .lab{display:none}
+.m-world .hot.on .lab{display:block}
+.m-world .hot::before{content:"";position:absolute;inset:-12px}   /* 44 px tap target */
+.m-world .pill::before{content:"";position:absolute;inset:-8px}
+.m-mark{position:absolute;width:22px;height:22px;margin:-11px 0 0 -11px;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px var(--ink);opacity:0;pointer-events:none;z-index:2}
+.m-mark.on{animation:mark .5s ease-out}
+@keyframes mark{0%{opacity:1;transform:scale(.4)}100%{opacity:0;transform:scale(1.3)}}
+
+/* Nicky's speech bubble, docked like a dialogue box */
+.m-say{position:absolute;left:10px;right:10px;top:10px;z-index:6;display:flex;gap:10px;align-items:flex-start;padding:10px 42px 10px 10px;border:2.5px solid var(--ink);border-radius:14px;background:#fff;box-shadow:4px 4px 0 var(--ink);font:600 14px/1.4 var(--font-sans);transition:opacity .25s,translate .25s}
+.m-say img{flex:none;width:36px;height:24px;margin-top:1px;image-rendering:pixelated}
+.m-say p{margin:0}
+.m-say.gone{opacity:0;translate:0 -8px;pointer-events:none}
+/* rooms are small on a phone: there the bubble sits at the top of the panel below, not over the room */
+.m-sheet .m-say{position:relative;left:auto;right:auto;top:auto;flex:none}
+.m-sheet .m-say.gone{display:none}
+.m-hint{position:absolute;left:10px;bottom:30px;z-index:6;padding:6px 10px;border-radius:999px;background:var(--ink);color:#fff;font:800 12px/1 var(--font-sans);pointer-events:none;transition:opacity .3s}
+.m-hint.gone{opacity:0}
+
+/* bottom sheet */
+.m-sheet{display:flex;flex-direction:column;background:var(--cream)}
+.is-map .m-sheet{position:absolute;left:0;right:0;bottom:0;height:74%;z-index:10;border-top:2.5px solid var(--ink);border-radius:20px 20px 0 0;box-shadow:0 -3px 0 rgba(43,36,51,.18);transform:translateY(calc(100% - var(--peek)));transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+.is-map .m-sheet.open{transform:none}
+.is-room .m-sheet{flex:1;min-height:0}
+.m-handle{flex:none;position:relative;display:flex;align-items:center;justify-content:space-between;gap:12px;height:58px;padding:10px 18px 0;border:0;background:none;color:var(--ink);font:800 20px var(--font-sans);text-align:left;cursor:pointer;touch-action:none}
+.m-handle::before{content:"";position:absolute;left:50%;top:8px;width:44px;height:5px;margin-left:-22px;border-radius:9px;background:var(--ink-3)}
+.m-handle small{font:800 12px var(--font-sans);padding:5px 10px;border:2px solid var(--ink);border-radius:999px;background:#fff}
+.m-handle:focus-visible{outline:3px solid var(--focus);outline-offset:-4px}
+.m-sheet-in{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:18px;padding:4px 16px 28px}
+.is-room .m-sheet-in{padding-top:14px}
+.m-sheet .aside{flex:none;max-width:none}
+.m-sheet .aside-in{gap:12px}
+.m-sheet .tiles{display:flex;max-height:none;overflow-x:auto;overflow-y:hidden;gap:8px;padding:2px 4px 8px 2px;scroll-snap-type:x proximity;scrollbar-gutter:auto}
+.m-sheet .tile{flex:none;width:84px;height:84px;scroll-snap-align:start}
+.m-sheet .tile img{width:38px;height:38px}
+.m-sheet .qtabs{flex-wrap:nowrap;overflow-x:auto;padding:2px 2px 8px}
+.m-sheet .qtab{flex:none}
+.m-sheet .detail strong,.m-sheet .quest .t{font-size:20px}
+.m-sheet::-webkit-scrollbar,.m-sheet *::-webkit-scrollbar,.m-scroll::-webkit-scrollbar{height:8px;width:8px}
+/* case rooms: a button per case, then the quest log */
+.m-cases{display:flex;flex-direction:column;gap:10px}
+.m-cases[hidden],.m-back[hidden],.m-talk[hidden]{display:none}
+.m-case{width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;border-width:2.5px;box-shadow:3px 3px 0 var(--ink)}
+.m-case:active{translate:2px 2px;box-shadow:none}
+.m-case:focus-visible,.m-back:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+.m-back{align-self:flex-start;min-height:36px;padding:8px 14px;border:2px solid var(--ink);border-radius:999px;background:var(--cream);color:var(--ink);font:800 13px/1 var(--font-sans);cursor:pointer}
+.m-back:active{background:var(--green);color:#fff}
+.m-talk{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-top:16px;border-top:2.5px dashed var(--ink-3)}
+.m-talk>span{font:800 22px var(--font-sans)}
+.m-talk .links{display:flex;align-items:center;gap:12px}
+
+/* list view and placeholders */
+.m-scroll{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:18px;padding:16px 16px 28px}
+.m-scroll .list-body{padding:0;gap:18px}
+.m-scroll .list-intro{font-size:15px}
+.m-scroll .row.item{flex:1 1 100%}
+.m-scroll .row .line,.m-scroll .row .tags,.m-scroll .row .name{flex-basis:100%}
+.m-scroll .stub{padding:8px 0}
+.m-err{margin:24px;font:700 16px/1.5 var(--font-sans)}
+</style>
+</head>
+<body class="m-body">
+<div class="m-phone">
+  <header class="m-top">
+    <button class="m-logo" type="button" data-go="index.html"><img src="assets/head.png?v=efc31154" alt="">Nicky</button>
+    <a class="btn m-about" href="index.html" data-go="index.html">About this project</a>
+  </header>
+  <div class="m-bar"><span class="dots" aria-hidden="true"><i></i><i></i></span><span id="title"></span></div>
+  <div class="m-menu" id="menu"></div>
+  <main class="m-screen" id="screen"></main>
+  <div class="m-fade" id="fade"></div>
+</div>
+<p class="m-caption">Mobile prototype · tap the map to walk</p>
+
+<script src="js/config.js?v=044eecde"></script>
+<script>
+(function () {
+  var SW = 24, SH = 32, FEET = { x: 6, y: 22, w: 12, h: 8 }, SPEED = 90, G = 4;
+  var ROW = { down: 0, up: 1, left: 2, right: 3 };
+  var KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+
+  var screen = document.getElementById('screen'), titleEl = document.getElementById('title');
+  var menuEl = document.getElementById('menu'), fade = document.getElementById('fade');
+  var game = null, cur = null, hintDone = false;   // the walk hint goes away for good after the first walk
+
+  function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html) e.innerHTML = html; return e; }
+  function hits(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(v, hi)); }
+  function sectionOf(f) { return /^(index|about|about-list|room-home|room-klimhal)\.html$/.test(f) ? 'about' : 'work'; }
+  function local(href) { return href && !/^(mailto:|tel:|https?:|#)/.test(href) && /\.html/.test(href); }
+
+  /* ---------- navigation ---------- */
+  function go(url, push) {
+    var u = new URL(url, location.href), file = u.pathname.split('/').pop() || 'index.html';
+    if (file === 'mobile.html') file = 'index.html';
+    if (file === 'about.html') file = 'index.html';
+    if (file === 'project.html') file = 'work.html';
+    fetch(file, { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw 0; return r.text(); }).then(function (html) {
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      var key = file + u.search + u.hash;
+      if (push !== false) history.pushState({ p: key }, '', '?p=' + encodeURIComponent(key));
+      render(file, u, doc);
+      fade.classList.remove('on');
+    }).catch(function () {
+      fade.classList.remove('on');
+      screen.innerHTML = '<p class="m-err">This prototype loads the real pages, so it needs the site served over http:<br><code>python3 -m http.server 8000</code><br>then open http://localhost:8000/mobile.html</p>';
+    });
+  }
+  function leave(url) { stopGame(); fade.classList.add('on'); setTimeout(function () { go(url); }, 170); }
+  window.addEventListener('popstate', function (e) { go((e.state && e.state.p) || 'index.html', false); });
+  document.querySelectorAll('[data-go]').forEach(function (b) { b.addEventListener('click', function (e) { e.preventDefault(); leave(b.dataset.go); }); });
+  menuEl.addEventListener('click', function (e) {
+    var a = e.target.closest('a[href]'); if (!a) return;
+    e.preventDefault(); if (!a.classList.contains('on')) leave(a.getAttribute('href'));
+  });
+
+  function render(file, u, doc) {
+    stopGame();
+    var list = /-list\.html$/.test(file);
+    cur = { file: file, sect: sectionOf(file), list: list };
+    var t = doc.querySelector('.titlebar .title'); titleEl.textContent = t ? t.textContent : '';
+    var menu = doc.querySelector('nav.menu');
+    menuEl.innerHTML = ''; if (menu) menuEl.appendChild(document.importNode(menu, true));
+    document.title = doc.title.replace(/ –.*/, '') + ' – mobile prototype';
+
+    screen.className = 'm-screen'; screen.innerHTML = ''; void screen.offsetWidth; screen.classList.add('enter');
+    var stage = doc.getElementById('stage'), data = doc.getElementById('world-data');
+    if (stage && data) renderWorld(doc, stage, JSON.parse(data.textContent), u);
+    else {
+      var box = el('div', 'm-scroll');
+      var body = doc.querySelector('.list-body') || doc.querySelector('.stub') || doc.querySelector('.window-body');
+      if (body) box.appendChild(document.importNode(body, true));
+      box.appendChild(talk(doc));
+      screen.appendChild(box);
+      bindLinks(box, null);
+    }
+  }
+
+  function talk(doc) {
+    var d = el('div', 'm-talk', '<span>Let\'s talk.</span>');
+    var links = doc.querySelector('.site-footer .links') || doc.querySelector('.site-footer .btn');
+    if (links) d.appendChild(document.importNode(links, true));
+    return d;
+  }
+
+  /* Links: a door on this map → Nicky walks there first. Anything else → straight to that page. */
+  function bindLinks(root, g) {
+    root.addEventListener('click', function (e) {
+      var a = e.target.closest('a[href]'); if (!a) return;
+      var href = a.getAttribute('href'); if (!local(href)) return;
+      e.preventDefault(); e.stopPropagation();
+      var sheet = screen.querySelector('.m-sheet');
+      if (g && g.walkToDoor(href)) { if (sheet) sheet.classList.remove('open'); return; }
+      leave(href);
+    });
+  }
+
+  /* ---------- a world: map (cover + camera) or room (fit width + panel below) ---------- */
+  function renderWorld(doc, stage, cfg, u) {
+    var aside = doc.querySelector('.aside');
+    var room = !!(aside && aside.querySelector('.tiles, .quest'));
+    screen.classList.add(room ? 'is-room' : 'is-map');
+
+    var wrap = el('div', 'm-wrap'), world = el('div', 'm-world');
+    var src = stage.querySelector('img.world'), img = el('img', 'm-img');
+    img.src = src.getAttribute('src'); img.alt = src.alt; img.draggable = false;
+    world.appendChild(img);
+    Array.prototype.forEach.call(stage.children, function (c) {
+      if (c === src || c.id === 'bubble' || c.id === 'hero') return;
+      world.appendChild(document.importNode(c, true));
+    });
+    var mark = el('div', 'm-mark'); world.appendChild(mark);
+    var hero = el('div', 'hero'); hero.setAttribute('role', 'img'); hero.setAttribute('aria-label', 'Nicky'); world.appendChild(hero);
+    wrap.appendChild(world);
+    if (room) wrap.style.aspectRatio = cfg.w + '/' + cfg.h;
+
+    var b = doc.getElementById('bubble'), say = null;
+    if (b) {
+      say = el('div', 'm-say', '<img src="assets/head.png?v=efc31154" alt=""><p></p><button class="bubble-close" type="button" aria-label="Close">×</button>');
+      say.querySelector('p').textContent = b.textContent;
+      say.querySelector('button').addEventListener('click', function (e) { e.stopPropagation(); say.classList.add('gone'); });
+      if (!room) wrap.appendChild(say);
+    }
+    var hint = el('span', 'm-hint'); hint.textContent = 'Tap anywhere to walk';
+    if (!room && !hintDone) wrap.appendChild(hint);
+    screen.appendChild(wrap);
+
+    var sheet = el('section', 'm-sheet'), inner = el('div', 'm-sheet-in');
+    if (room && say) inner.appendChild(say);
+    if (aside) {
+      var a = document.importNode(aside, true);
+      var h = a.querySelector('.hint'); if (h) h.textContent = 'Tap the map to walk. Tap a place to walk there.';
+      if (!room) {
+        var head = a.querySelector('.aside-head h2');
+        var handle = el('button', 'm-handle'); handle.type = 'button';
+        handle.innerHTML = '<span></span><small>Show</small>';
+        handle.firstChild.textContent = head ? head.textContent : 'More';
+        if (head) head.parentNode.remove();
+        sheet.appendChild(handle);
+        bindSheet(sheet, handle);
+      }
+      inner.appendChild(a);
+    }
+    inner.appendChild(talk(doc));
+    sheet.appendChild(inner);
+    screen.appendChild(sheet);
+
+    game = startGame(cfg, u.searchParams.get('from'), { wrap: wrap, world: world, hero: hero, mark: mark, room: room,
+      onWalk: function (d) { if (d > 12) { hint.classList.add('gone'); hintDone = true; } if (d > 60 && say && !room) say.classList.add('gone'); } });
+    bindLinks(wrap, game);
+    bindLinks(sheet, game);
+    if (room) bindRoom(screen, game, u);
+    if (screen.querySelector('#spin')) nowSpinning(world);
+  }
+
+  function bindSheet(sheet, handle) {
+    var y0 = null;
+    function set(open) { sheet.classList.toggle('open', open); handle.querySelector('small').textContent = open ? 'Hide' : 'Show'; }
+    handle.addEventListener('pointerdown', function (e) { y0 = e.clientY; });
+    handle.addEventListener('pointerup', function (e) {
+      if (y0 === null) return; var dy = e.clientY - y0; y0 = null;
+      set(dy < -20 ? true : dy > 20 ? false : !sheet.classList.contains('open'));
+    });
+    handle.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); set(!sheet.classList.contains('open')); } });
+    sheet.addEventListener('click', function (e) { if (e.target.closest('a[href]')) set(false); });
+  }
+
+  /* Rooms: a dot or a tile shows that item below and Nicky walks over to it. Case rooms light up a quest field. */
+  function bindRoom(root, g, u) {
+    var tiles = root.querySelectorAll('.tile'), dots = root.querySelectorAll('.hot');
+    var details = root.querySelectorAll('.detail'), fields = root.querySelectorAll('.qf'), lit = null;
+    function select(key) {
+      lit = key;
+      var say = root.querySelector('.m-sheet .m-say'); if (say) say.classList.add('gone');   // the intro has done its job
+      tiles.forEach(function (t) { var on = t.dataset.item === key; t.classList.toggle('on', on); t.setAttribute('aria-pressed', on); });
+      dots.forEach(function (d) { d.classList.toggle('on', d.dataset.item === key); });
+      if (tiles.length) details.forEach(function (d) { d.hidden = d.dataset.item !== key; });
+      fields.forEach(function (f) { f.classList.toggle('on', f.dataset.item === key && !f.parentNode.hidden); });
+      var on = root.querySelector('.tile.on') || root.querySelector('.quest:not([hidden]) .qf.on');
+      if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+      var dot = root.querySelector('.hot[data-item="' + key + '"]'); if (dot) g.walkToDot(dot);
+    }
+    tiles.forEach(function (t) { t.addEventListener('click', function () { select(t.dataset.item); }); });
+    dots.forEach(function (d) { d.addEventListener('click', function (e) { e.stopPropagation(); select(d.dataset.item); }); });
+    /* Case rooms: the quest log starts closed. Under the bubble sits one button per case; opening one shows its
+       quest log. A room with more than one case (IKEA) gets "All cases" to go back to the choice. */
+    var quests = root.querySelectorAll('.quest');
+    if (!quests.length) return;
+    var tabs = root.querySelector('.qtabs'); if (tabs) tabs.remove();
+    var head = root.querySelector('.aside-head h2');
+    var pick = el('div', 'm-cases'), back = null, open = -1, lastOpen = 0;
+    quests.forEach(function (q, n) {
+      q.hidden = true;
+      var b = el('button', 'card m-case');
+      b.type = 'button';
+      b.innerHTML = '<span class="card-head"><strong></strong><span class="badge">Open case →</span></span><span class="desc"></span>';
+      b.querySelector('strong').textContent = q.querySelector('.t').textContent;
+      // under the name: the kind of project, and the client when there is one (Swifty: Heineken)
+      b.querySelector('.desc').textContent = q.querySelector('.k').textContent + (q.dataset.client ? ' · ' + q.dataset.client : '');
+      b.addEventListener('click', function () { openCase(n); });
+      pick.appendChild(b);
+    });
+    quests[0].parentNode.insertBefore(pick, quests[0]);
+    // A way back to the overview from every case: "All cases" when there are several, "Back" when there is one.
+    back = el('button', 'm-back', quests.length > 1 ? '← All cases' : '← Back'); back.type = 'button'; back.hidden = true;
+    back.addEventListener('click', function () { openCase(-1); });
+    quests[0].parentNode.insertBefore(back, quests[0]);
+    var talkEl = root.querySelector('.m-talk'), say = root.querySelector('.m-sheet .m-say');
+    var quotes = root.querySelectorAll('.quote[data-for]'), lone = root.querySelector('.quote[data-lone]');
+    function openCase(n) {
+      open = n; if (n >= 0) lastOpen = n;
+      quests.forEach(function (q, i) { q.hidden = i !== n; });
+      // a colleague's quote shows under its own case; the colleague on her own only when you tap her
+      quotes.forEach(function (q) { q.hidden = n < 0 || q.dataset.for !== quests[n].id; });
+      if (lone) lone.hidden = true;
+      pick.hidden = n >= 0;
+      back.hidden = n < 0;
+      if (head) head.textContent = n >= 0 ? 'Quest log' : (quests.length > 1 ? 'Cases' : 'The case');
+      fields.forEach(function (f) { f.classList.toggle('on', f.dataset.item === lit && !f.parentNode.hidden); });
+      // the overview is the bubble and the case cards only; "Let's talk" belongs to the case itself
+      if (say) say.classList.toggle('gone', n >= 0);
+      if (talkEl) talkEl.hidden = n < 0;
+      // a room with a dot per case (IKEA): the open case's dot is the green one
+      dots.forEach(function (o) { if (o.dataset.case) o.classList.toggle('on', +o.dataset.case === n + 1); });
+      root.querySelector('.m-sheet-in').scrollTop = 0;
+    }
+    // A case dot (IKEA) opens its case. A field dot while no case is open opens the last case you looked at.
+    dots.forEach(function (d) {
+      d.addEventListener('click', function () {
+        if (d.dataset.case) openCase(d.dataset.case - 1);
+        else if (d.dataset.quote) {
+          openCase(-1);
+          if (lone) { lone.hidden = false; setTimeout(function () { lone.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, 50); }
+        }
+        else if (open < 0) { openCase(lastOpen); select(d.dataset.item); }
+      }, true);
+    });
+    var m = /^#case-(\d+)$/.exec(u.hash);
+    openCase(m && quests[m[1] - 1] ? m[1] - 1 : -1);
+  }
+
+  /* ---------- walking: tap → path around the furniture (grid search) → walk ---------- */
+  function startGame(cfg, from, v) {
+    var W = cfg.w, H = cfg.h, sp = cfg.spawns[from] || cfg.spawns['default'];
+    var s = { x: sp[0], y: sp[1], dir: sp[2] || 'down', path: [], door: null, keys: {}, frame: 0, ft: 0, walked: 0, last: 0, raf: 0, alive: true, scale: 1 };
+    var off = [];
+    v.hero.style.width = (SW / W * 100) + '%';
+
+    function feet(px, py) { return { x: px + FEET.x, y: py + FEET.y, w: FEET.w, h: FEET.h }; }
+    function blocked(px, py) {
+      if (px < 0 || py < -FEET.y + 2 || px > W - SW || py > H - SH) return true;
+      var f = feet(px, py);
+      for (var i = 0; i < cfg.solid.length; i++) { var o = cfg.solid[i]; if (hits(f, { x: o[0], y: o[1], w: o[2], h: o[3] })) return true; }
+      return false;
+    }
+    var YMIN = -FEET.y + 2, NX = Math.floor((W - SW) / G) + 1, NY = Math.floor((H - SH - YMIN) / G) + 1;
+    var free = new Uint8Array(NX * NY);
+    for (var j = 0; j < NY; j++) for (var i = 0; i < NX; i++) free[j * NX + i] = blocked(i * G, YMIN + j * G) ? 0 : 1;
+    function px(k) { return (k % NX) * G; }
+    function py(k) { return YMIN + Math.floor(k / NX) * G; }
+    function nearestFree(x, y) {
+      var best = -1, bd = 1e9;
+      for (var k = 0; k < free.length; k++) if (free[k]) { var d = (px(k) - x) * (px(k) - x) + (py(k) - y) * (py(k) - y); if (d < bd) { bd = d; best = k; } }
+      return best;
+    }
+    function findPath(tx, ty) {
+      var start = nearestFree(s.x, s.y); if (start < 0) return [];
+      var prev = new Int32Array(free.length).fill(-2), q = [start], best = start, bd = 1e9; prev[start] = -1;
+      for (var h = 0; h < q.length; h++) {
+        var k = q[h], x = k % NX, y = Math.floor(k / NX);
+        var d = (px(k) - tx) * (px(k) - tx) + (py(k) - ty) * (py(k) - ty); if (d < bd) { bd = d; best = k; }
+        for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          var nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= NX || ny >= NY) continue;
+          var n = ny * NX + nx; if (!free[n] || prev[n] !== -2) continue;
+          if (dx && dy && (!free[y * NX + nx] || !free[ny * NX + x])) continue;
+          prev[n] = k; q.push(n);
+        }
+      }
+      var pts = []; for (var c = best; c >= 0; c = prev[c]) pts.unshift([px(c), py(c)]);
+      return smooth(pts);
+    }
+    function los(ax, ay, bx, by) {
+      var n = Math.ceil(Math.hypot(bx - ax, by - ay) / 2);
+      for (var k = 1; k <= n; k++) if (blocked(ax + (bx - ax) * k / n, ay + (by - ay) * k / n)) return false;
+      return true;
+    }
+    function smooth(pts) {   // cut corners where the line is free, so Nicky walks straight instead of zig-zag
+      var out = [], cx = s.x, cy = s.y, i = 0;
+      while (i < pts.length) {
+        var j = Math.min(i + 40, pts.length - 1);
+        while (j > i && !los(cx, cy, pts[j][0], pts[j][1])) j--;
+        out.push(pts[j]); cx = pts[j][0]; cy = pts[j][1]; i = j + 1;
+      }
+      return out;
+    }
+    // A door only opens when it is where you wanted to go: you tapped the door, its Enter pill or its card.
+    // Walking past a door on the way somewhere else never takes you inside.
+    function doorAt(tx, ty) {
+      var f = feet(tx, ty), grow = 6;
+      for (var i = 0; i < cfg.doors.length; i++) {
+        var d = cfg.doors[i];
+        if (hits(f, { x: d[0] - grow, y: d[1] - grow, w: d[2] + grow * 2, h: d[3] + grow * 2 })) return d[4];
+      }
+      return null;
+    }
+    function walkTo(tx, ty, door) { s.path = findPath(tx, ty); s.door = door || doorAt(tx, ty); s.keys = {}; }
+    function pulse(wx, wy) {
+      v.mark.style.left = (wx / W * 100) + '%'; v.mark.style.top = (wy / H * 100) + '%';
+      v.mark.classList.remove('on'); void v.mark.offsetWidth; v.mark.classList.add('on');
+    }
+
+    // tap on the map
+    var down = null;
+    function onDown(e) { down = { x: e.clientX, y: e.clientY }; }
+    function onClick(e) {
+      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 12) return;
+      if (e.target.closest('a, button')) return;
+      var r = v.world.getBoundingClientRect(), wx = (e.clientX - r.left) / s.scale, wy = (e.clientY - r.top) / s.scale;
+      pulse(wx, wy); walkTo(wx - SW / 2, wy - FEET.y - FEET.h / 2);
+    }
+    function on(t, ev, fn, opt) { t.addEventListener(ev, fn, opt); off.push(function () { t.removeEventListener(ev, fn, opt); }); }
+    on(v.wrap, 'pointerdown', onDown);
+    on(v.wrap, 'click', onClick);
+    on(window, 'keydown', function (e) { var d = KEYS[e.key]; if (d) { s.keys[d] = true; s.path = []; s.door = null; e.preventDefault(); } });
+    on(window, 'keyup', function (e) { var d = KEYS[e.key]; if (d) s.keys[d] = false; });
+    var ro = new ResizeObserver(draw); ro.observe(v.room ? v.wrap : screen); off.push(function () { ro.disconnect(); });
+
+    function draw() {
+      var ww = v.wrap.clientWidth, wh = v.wrap.clientHeight; if (!ww) return;
+      if (v.room) s.scale = ww / W;
+      else {
+        // Maps: at most 2x the width-fit zoom, so you see enough of the world. Whatever height is left goes to the sheet.
+        var avail = screen.clientHeight - 58;
+        s.scale = Math.max(ww / W, Math.min(avail / H, ww / W * 2));
+        wh = Math.min(avail, Math.round(H * s.scale));
+        if (v.wrap.clientHeight !== wh) { v.wrap.style.height = wh + 'px'; screen.style.setProperty('--peek', (screen.clientHeight - wh + 20) + 'px'); }
+      }
+      var sw = W * s.scale, sh = H * s.scale;
+      var tx = clamp(ww / 2 - (s.x + SW / 2) * s.scale, ww - sw, 0), ty = clamp(wh / 2 - (s.y + SH / 2) * s.scale, wh - sh, 0);
+      v.world.style.width = sw + 'px'; v.world.style.height = sh + 'px';
+      v.world.style.transform = 'translate3d(' + Math.round(tx) + 'px,' + Math.round(ty) + 'px,0)';
+      v.hero.style.left = (s.x / W * 100) + '%'; v.hero.style.top = (s.y / H * 100) + '%';
+      v.hero.style.backgroundPosition = ((s.moving ? s.frame % 4 : 0) * 33.3333) + '% ' + (ROW[s.dir] * 33.3333) + '%';
+    }
+    function face(dx, dy) { s.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'); }
+    function exit(url) { s.alive = false; draw(); leave(url); }
+
+    function tick(t) {
+      if (!s.alive) return;
+      var dt = Math.min((t - s.last) / 1000, 0.05); s.last = t;
+      var step = SPEED * dt, ox = s.x, oy = s.y;
+      var kx = (s.keys.right ? 1 : 0) - (s.keys.left ? 1 : 0), ky = (s.keys.down ? 1 : 0) - (s.keys.up ? 1 : 0);
+      if (kx || ky) {
+        var len = Math.hypot(kx, ky); face(kx, ky);
+        if (!blocked(s.x + kx * step / len, s.y)) s.x += kx * step / len;
+        if (!blocked(s.x, s.y + ky * step / len)) s.y += ky * step / len;
+      } else if (s.path.length) {
+        var p = s.path[0], dx = p[0] - s.x, dy = p[1] - s.y, d = Math.hypot(dx, dy);
+        if (d <= step) { s.x = p[0]; s.y = p[1]; s.path.shift(); } else { s.x += dx / d * step; s.y += dy / d * step; }
+        if (d > 0.5) face(dx, dy);
+      } else if (s.door) { exit(s.door); return; }
+      s.moving = s.x !== ox || s.y !== oy;
+      if (s.moving) {
+        s.walked += Math.hypot(s.x - ox, s.y - oy); v.onWalk(s.walked);
+        s.ft += dt; if (s.ft > 0.13) { s.ft = 0; s.frame++; }
+        var f = feet(s.x, s.y), manual = kx || ky;   // with the arrow keys every door opens, like on the desktop
+        for (var i = 0; i < cfg.doors.length; i++) {
+          var dd = cfg.doors[i];
+          if ((manual || dd[4] === s.door) && hits(f, { x: dd[0], y: dd[1], w: dd[2], h: dd[3] })) { exit(dd[4]); return; }
+        }
+      } else { s.frame = 0; s.ft = 0; }
+      draw();
+      s.raf = requestAnimationFrame(tick);
+    }
+    draw();
+    s.raf = requestAnimationFrame(function (t) { s.last = t; tick(t); });
+
+    return {
+      stop: function () { s.alive = false; cancelAnimationFrame(s.raf); off.forEach(function (f) { f(); }); },
+      walkToDoor: function (href) {
+        var d = cfg.doors.filter(function (o) { return o[4] === href; })[0]; if (!d) return false;
+        var cx = d[0] + d[2] / 2, cy = d[1] + d[3] / 2; pulse(cx, cy);
+        walkTo(cx - SW / 2, cy - FEET.y - FEET.h / 2, href); return true;
+      },
+      walkToDot: function (dot) {
+        var wx = parseFloat(dot.style.left) / 100 * W, wy = parseFloat(dot.style.top) / 100 * H;
+        walkTo(wx - SW / 2, wy - FEET.y + 10);   // stand just below the object
+      }
+    };
+  }
+  function stopGame() { if (game) game.stop(); game = null; stopSpin(); }
+
+  /* Now spinning (Home, Records): last.fm "currently playing", the same as js/home.js on the desktop.
+     Settings (username, API key) live in js/config.js. */
+  var spinTimer = 0, spinRun = null;
+  function stopSpin() { clearInterval(spinTimer); spinTimer = 0; if (spinRun) spinRun.dead = true; spinRun = null; }
+  function nowSpinning(world) {
+    var box = screen.querySelector('#spin'), label = screen.querySelector('#spin-label'), text = screen.querySelector('#spin-text');
+    var vinyl = screen.querySelector('#vinyl'), cfg = (window.SITE && window.SITE.lastfm) || {}, run = spinRun = { dead: false };
+    function show(state, l, t) {
+      label.textContent = l || ''; text.textContent = t || '';
+      var on = state === 'playing';
+      box.hidden = state === 'idle';
+      box.classList.toggle('on', on);
+      world.classList.toggle('playing', on);
+      if (vinyl) vinyl.classList.toggle('paused', state === 'idle');
+    }
+    if (!cfg.user || !cfg.key) { show('unset', 'Now spinning', '[ADD: last.fm username and API key in js/config.js]'); return; }
+    function load() {
+      fetch('https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&limit=1&format=json&user=' +
+        encodeURIComponent(cfg.user) + '&api_key=' + encodeURIComponent(cfg.key)).then(function (r) { return r.json(); }).then(function (j) {
+        if (run.dead) return;
+        var tr = j && j.recenttracks && j.recenttracks.track; if (tr && tr.length) tr = tr[0];
+        if (tr && tr.name && tr['@attr'] && tr['@attr'].nowplaying === 'true') show('playing', 'Now spinning', (tr.artist && (tr.artist['#text'] || tr.artist.name) || '') + ' – ' + tr.name);
+        else show('idle');
+      }).catch(function () { if (!run.dead) show('idle'); });
+    }
+    load();
+    spinTimer = setInterval(function () { if (!document.hidden) load(); }, 30000);
+  }
+
+  var start = new URLSearchParams(location.search).get('p') || 'index.html';
+  history.replaceState({ p: start }, '', location.search || '?p=index.html');
+  go(start, false);
+})();
+</script>
+</body>
+</html>
